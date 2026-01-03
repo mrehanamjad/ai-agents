@@ -5,20 +5,39 @@ from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
 
 # --- Page Configuration ---
-st.set_page_config(page_title="Llama 3.2 Streamer", page_icon="⚡", layout="centered")
+st.set_page_config(page_title="Ollama Multi-Model Streamer", page_icon="⚡", layout="centered")
 
 st.title("⚡ Real-time AI Assistant")
-st.caption("Chatting with Llama 3.2:1b via Ollama")
-st.markdown("---")
 
-# --- 1. Setup the Model ---
+# --- 1. Sidebar (Model Selection & Controls) ---
+with st.sidebar:
+    st.header("Control Panel")
+    
+    # Model Selection Dropdown
+    # Note: Ensure these models are already pulled in your Ollama instance
+    model_options = ["llama3.2:1b","qwen2.5-coder:1.5b","qwen2.5-coder:3b","qwen2.5:3b"]
+    selected_model = st.selectbox("Choose a Model", options=model_options, index=0)
+    
+    st.caption(f"Currently using: **{selected_model}**")
+    st.markdown("---")
+    
+    session_id = st.text_input("Session ID", value="user_123")
+    
+    if st.button("Clear Chat"):
+        st.session_state.messages = []
+        st.session_state.store = {}
+        st.session_state.generating = False
+        st.rerun()
+
+# --- 2. Setup the Model ---
+# We use the selected_model as a cache key so it reloads only when changed
 @st.cache_resource
-def load_model():
-    return ChatOllama(model="llama3.2:1b")
+def load_model(model_name):
+    return ChatOllama(model=model_name)
 
-model = load_model()
+model = load_model(selected_model)
 
-# --- 2. Initialize Session State ---
+# --- 3. Initialize Session State ---
 if "store" not in st.session_state:
     st.session_state.store = {}
 if "messages" not in st.session_state:
@@ -31,13 +50,14 @@ def get_session_history(session_id: str):
         st.session_state.store[session_id] = ChatMessageHistory()
     return st.session_state.store[session_id]
 
-# --- 3. Build the LangChain Logic ---
+# --- 4. Build the LangChain Logic ---
 prompt = ChatPromptTemplate.from_messages([
     ("system", "You are a helpful and concise AI assistant."),
     MessagesPlaceholder(variable_name="history"),
     ("human", "{input}"),
 ])
 
+# The chain now uses the model instance derived from the sidebar selection
 chain = prompt | model
 wrapped_chain = RunnableWithMessageHistory(
     chain,
@@ -45,16 +65,6 @@ wrapped_chain = RunnableWithMessageHistory(
     input_messages_key="input",
     history_messages_key="history",
 )
-
-# --- 4. Sidebar ---
-with st.sidebar:
-    st.header("Control Panel")
-    session_id = st.text_input("Session ID", value="user_123")
-    if st.button("Clear Chat"):
-        st.session_state.messages = []
-        st.session_state.store = {}
-        st.session_state.generating = False
-        st.rerun()
 
 # --- 5. Display Chat History ---
 for message in st.session_state.messages:
@@ -72,8 +82,6 @@ if user_input:
 if st.session_state.generating:
     last_user_prompt = st.session_state.messages[-1]["content"]
     
-    # --- STOP BUTTON LOGIC ---
-    # We place the button in a container so it appears above or below the generating text
     stop_button = st.button("Stop Generating", type="primary")
     
     if stop_button:
@@ -85,18 +93,12 @@ if st.session_state.generating:
         full_response = ""
         
         try:
-            # We iterate manually through the stream to allow for interruption
             for chunk in wrapped_chain.stream(
                 {"input": last_user_prompt},
                 config={"configurable": {"session_id": session_id}}
             ):
                 full_response += chunk.content
                 response_placeholder.markdown(full_response + "▌")
-                
-                # Check if the user pressed 'Stop' during the loop
-                # Note: In Streamlit, a button click triggers a rerun, 
-                # so the script usually restarts before this check completes.
-                # However, this manual loop is necessary for clean state handling.
             
             response_placeholder.markdown(full_response)
             st.session_state.messages.append({"role": "assistant", "content": full_response})
@@ -104,5 +106,5 @@ if st.session_state.generating:
             st.rerun()
             
         except Exception as e:
+            st.error(f"Error: {e}")
             st.session_state.generating = False
-            st.rerun()

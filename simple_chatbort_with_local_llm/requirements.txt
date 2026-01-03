@@ -3,3 +3,5 @@ langchain-core==1.2.5
 langchain-ollama==1.0.1
 st-copy-to-clipboard==0.1.6
 streamlit==1.52.2
+
+langchain==1.2.0
